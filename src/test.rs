@@ -288,7 +288,7 @@ fn test_paper_wins() {
 }
 
 #[test]
-fn test_cancel() {
+fn test_cancel_and_replay() {
     let e: Env = Default::default();
     let admin = e.accounts().generate(); // token admin
     let u1 = e.accounts().generate();
@@ -375,9 +375,9 @@ fn test_cancel() {
     e.set_source_account(&admin);
     contract.cancel(&Signature::Invoker, &Player::One);
 
-    assert_eq!(usdc_token.balance(&Identifier::Account(admin.clone())), 10);
+    assert_eq!(usdc_token.balance(&Identifier::Account(admin.clone())), 20);
     assert_eq!(usdc_token.balance(&Identifier::Account(u1.clone())), 0);
-    assert_eq!(usdc_token.balance(&contract_id), 10);
+    assert_eq!(usdc_token.balance(&contract_id), 0);
 
     usdc_token.with_source_account(&admin).approve(
         &Signature::Invoker,
@@ -396,6 +396,21 @@ fn test_cancel() {
     );
     matches!(move_pre, crate::Move::Paper);
 
+    usdc_token.with_source_account(&admin).mint(
+        &Signature::Invoker,
+        &BigInt::zero(&e),
+        &Identifier::Account(u1.clone()),
+        &BigInt::from_u32(&e, 10),
+    );
+
+    usdc_token.with_source_account(&u1).approve(
+        &Signature::Invoker,
+        &BigInt::zero(&e),
+        &contract_id,
+        &bigint!(&e, 10),
+    );
+    e.set_source_account(&u1);
+    contract.make_move(&Signature::Invoker, &u1_val);
     let u1_move_pre = contract.reveal(
         &crate::Player::Two,
         &crate::Move::Rock,
@@ -404,6 +419,6 @@ fn test_cancel() {
     matches!(u1_move_pre, crate::Move::Rock);
 
     matches!(contract.evaluate(), GameResult::Winner(Player::One));
-    assert_eq!(usdc_token.balance(&Identifier::Account(admin)), 20);
+    assert_eq!(usdc_token.balance(&Identifier::Account(admin)), 30);
     assert_eq!(usdc_token.balance(&Identifier::Account(u1)), 0);
 }

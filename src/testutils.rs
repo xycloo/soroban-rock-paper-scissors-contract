@@ -44,6 +44,6 @@ impl RockPaperScissorsContract {
     }
 
     pub fn cancel(&self, sig: &Signature, player: &Player) {
-        self.client().cancel(sig, player)
+        self.client().cancel()
     }
 }

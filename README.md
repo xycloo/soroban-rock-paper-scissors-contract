@@ -1,3 +1,28 @@
+# Rock-Paper-Scissors Betting Soroban Smart Contract
+
+## High-level overview
+This contract allows to bet with another user on a rock paper scissors game. This kind of betting/games design is also something we at @xycloo are interested in for future small protocols. 
+
+This contract allows for two users to play rock papers scissors by having them submit their moves hashed according the a [commit-reveal scheme](https://github.com/Xycloo/soroban-commit-reveal-contract). Once both players have sumbitted their move (without revealing it since it's a hash), they can reveal it. Once both moves are revealed, the contract evaluates the winner using a simple modulo algorithm.
+
+There are a couple of other things to keep in mind:
+- the contract has to be initialized by a game admin, which specifies some settings.
+- if a user doesn't reveal its move after $\Delta t$ (specified upon initialization) since the second player submitted their move, a user can call the `cancel` function, which resets the game and sends all the betted money to the user who revealed its move (since it assuments that the other user won't reveal theirs since they know the other user has already won).
+
+# Writing the contract
+> Reading this README assumes that you already have basic soroban knowledge (if you don't, I recommend looking at the soroban docs or at our previous submissions).
+
+### Some things to know
+In this contract we are going to use:
+- the standard token contract.
+- custom types (some with their own implementations (`TimeStamp`, `Move`, `PlayerObj`)).
+- contract errors (for better failure reports than a string panic). 
+- the same principles of the [commit-reveal scheme from one of our previous submissions](https://github.com/Xycloo/soroban-commit-reveal-contract).
+
+### Writing the data helpers
+We are going to use some data helper function in our contract invocation to have a more coincise code inside our contract functions:
+
+```rust
 #![no_std]
 
 #[cfg(feature = "testutils")]
@@ -116,7 +141,14 @@ fn get_bet(e: &Env) -> BigInt {
         .unwrap_or_else(|| panic_with_error!(e, Error::GameNotStarted))
         .unwrap()
 }
+```
 
+### Placing bets with the standard token contract
+To transfer from the user to the contract, we are going to use allowances. Allowances allow the `standard_token.xfer_from()` function to transfer from a specified address to another as long as there is an allowance for that (we could also use the advanced auth and accept a signature to use the `xfer` function).
+
+On the other hand, sending profits simmly requires the contract to transfer to the winning user.
+
+```rust
 fn place_bet(e: &Env, from: Identifier) {
     let client = token::Client::new(e, get_token(e));
     client.xfer_from(
@@ -132,6 +164,14 @@ fn send_profit(e: &Env, to: Identifier, amount: BigInt) {
     let client = token::Client::new(e, get_token(e));
     client.xfer(&Signature::Invoker, &BigInt::zero(e), &to, &amount)
 }
+
+```
+
+### Timestamp type
+
+To better distinguish timestamps, we create a custom type for them, and have them implement addition and subtraction functions:
+
+```rust
 
 // Perform arithmetic ops on custom types
 trait Arithmetic<Rhs = Self> {
@@ -165,6 +205,12 @@ impl Arithmetic<TimeStamp> for TimeStamp {
     }
 }
 
+```
+
+### Errors
+Errors in soroban smart contract work similarly to rust's errors. We need to define a `contracterror` type with a u32 representation so that the host can return the errors in the format `ContractError(Error::ThisError as u32)`:
+
+```rust
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -177,7 +223,14 @@ pub enum Error {
     LimitNotReached = 6,
     InvalidSignature = 7,
 }
+```
 
+You might have seen that we encountered some of these in our data helpers with `panic_with_error`. As we write our contract, it will become clearer what each error means.
+
+### Other contract types
+Below we define other contract types. They should be pretty self-explanatory, also, we need the `as_bytes()` method for the `Move` so that it can be used for building the hash (without serializing). `user_move` in `PlayerObj` is the hash of the user's move commitment, which we'll look at later.
+
+```rust
 #[contracttype]
 #[derive(Clone)]
 pub enum Player {
@@ -234,7 +287,11 @@ impl PlayerObj {
         }
     }
 }
+```
 
+### Contract data keys
+
+```rust
 #[contracttype]
 #[derive(Clone)]
 /// Contract data keys
@@ -247,6 +304,12 @@ pub enum DataKey {
     Nonce(Identifier),
     Player(Player),
 }
+```
+
+
+## Contract functions
+
+```rust
 
 /// Contract trait
 pub trait RockPaperScissorsTrait {
@@ -267,11 +330,16 @@ pub trait RockPaperScissorsTrait {
     fn cancel(e: Env) -> Result<(), Error>;
 }
 
-pub struct RockPaperScissorsContract;
+```
 
-#[contractimpl]
-impl RockPaperScissorsTrait for RockPaperScissorsContract {
-    fn initialize(
+### Initialize
+This function is needed to set up the contract by providing some important settings:
+- `token`: the tokenID the contract will use.
+- `bet_amount`: the ammount of `token` that users will have to bet in order to enter the game.
+- `ts_diff`: the previously-mentioned $\Delta t$.
+
+```rust
+	fn initialize(
         e: Env,
         token: BytesN<32>,
         bet_amount: BigInt,
@@ -287,8 +355,13 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
             Err(Error::GameNotStarted)
         }
     }
+```
 
-    fn make_move(e: Env, sig: Signature, user_move: BytesN<32>) -> Result<(), Error> {
+### Make move
+Users can call this function to enter the game. They will need to provide a signature (to authenticate) and a `user_move`. The function first performs the auth check and increases the nonce, then assings a `Player` to the user (`One` if the user is the first to make the move, `Second` is they are the second, else it panics since it means that there already are two players).
+
+```rust
+	fn make_move(e: Env, sig: Signature, user_move: BytesN<32>) -> Result<(), Error> {
         if !game_started(&e) {
             panic!("game started yet")
         }
@@ -312,10 +385,14 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
             Err(Error::MaxPlayersHit)
         }
     }
+```
 
-    // doesn't need authenticating since the revealer needs to know the secret
-    // the account id for the hash is only needed so that the hash image doesn't coincide if the same moves are hashed with the same secrets by two different users
-    fn reveal(e: Env, player: Player, user_move: Move, secret: Bytes) -> Result<Move, Error> {
+### Reveal
+Here the user reveals their move to the contract. This happens by re-creating the `user_move` supplied in `make_move()`. It's worth noting that no auth checks are required here since for the invocation to succeed, it still needs the user's secret.
+
+
+```rust
+	fn reveal(e: Env, player: Player, user_move: Move, secret: Bytes) -> Result<Move, Error> {
         let mut player_obj = get_move(&e, player.clone());
 
         let mut rhs = Bytes::new(&e);
@@ -334,6 +411,14 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
         Ok(user_move)
     }
 
+```
+
+### Evaluate
+This funciton can be called by anyone, and it consists of two parts:
+1. Checking that both users have revealed their moves.
+2. Determine the winner using a modulo algorithm. This algorithm works by assigning a u32 value to the `Move` enum, which is why we specified these u32 representations when defining the enum.
+
+```rust
     fn evaluate(e: Env) -> Result<GameResult, Error> {
         // check that both players have revealed
         if !check_revealed(&e, Player::One) || !check_revealed(&e, Player::Two) {
@@ -363,7 +448,13 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
         }
     }
 
-    fn cancel(e: Env) -> Result<(), Error> {
+```
+
+### Cancel
+This function can also be called by anyone. It prevents the problem of users not revealing their moves after seeing the competitor's revealed move. In fact, if $\Delta t$ has passed since the second user has made their move, and one of the two users didn't reveal their move, the user who revealed the move receives the whole betted amount:
+
+```rust
+	fn cancel(e: Env) -> Result<(), Error> {
         if TimeStamp::current(&e).sub(get_ts_limit(&e)) < get_bet_start(&e) {
             return Err(Error::LimitNotReached);
         }
@@ -382,4 +473,4 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
         remove_player(&e, Player::Two);
         Ok(())
     }
-}
+```
