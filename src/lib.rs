@@ -21,6 +21,12 @@ fn check_player(e: &Env, player: Player) -> bool {
     e.data().has(key)
 }
 
+fn check_revealed(e: &Env, player: Player) -> bool {
+    let obj = get_move(e, player);
+
+    !matches!(obj.move_pre, Move::Unrevealed)
+}
+
 fn put_started(e: &Env, started: bool) {
     let key = DataKey::Started;
     e.data().set(key, started);
@@ -29,6 +35,11 @@ fn put_started(e: &Env, started: bool) {
 fn game_started(e: &Env) -> bool {
     let key = DataKey::Started;
     e.data().get(key).unwrap_or(Ok(false)).unwrap()
+}
+
+fn remove_player(e: &Env, player: Player) {
+    let key = DataKey::Player(player);
+    e.data().remove(key);
 }
 
 fn store_move(e: &Env, player: Player, val: PlayerObj) {
@@ -67,6 +78,32 @@ fn get_token(e: &Env) -> BytesN<32> {
         .unwrap()
 }
 
+fn put_ts_limit(e: &Env, ts_diff: TimeStamp) {
+    let key = DataKey::TsLimit;
+    e.data().set(key, ts_diff);
+}
+
+fn get_ts_limit(e: &Env) -> TimeStamp {
+    let key = DataKey::TsLimit;
+    e.data()
+        .get(key)
+        .unwrap_or_else(|| panic_with_error!(e, Error::GameNotStarted))
+        .unwrap()
+}
+
+fn put_bet_start(e: &Env, ts: TimeStamp) {
+    let key = DataKey::BetStart;
+    e.data().set(key, ts);
+}
+
+fn get_bet_start(e: &Env) -> TimeStamp {
+    let key = DataKey::BetStart;
+    e.data()
+        .get(key)
+        .unwrap_or_else(|| panic_with_error!(e, Error::GameNotStarted))
+        .unwrap()
+}
+
 fn put_bet(e: &Env, amount: BigInt) {
     let key = DataKey::BetAmount;
     e.data().set(key, amount);
@@ -96,6 +133,38 @@ fn send_profit(e: &Env, to: Identifier, amount: BigInt) {
     client.xfer(&Signature::Invoker, &BigInt::zero(e), &to, &amount)
 }
 
+// Perform arithmetic ops on custom types
+trait Arithmetic<Rhs = Self> {
+    type Output;
+
+    fn add(self, rhs: Rhs) -> Self::Output;
+
+    fn sub(self, rhs: Rhs) -> Self::Output;
+}
+
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug)]
+#[contracttype]
+/// Timestamp type to enforce explicitness
+pub struct TimeStamp(pub u64);
+
+impl TimeStamp {
+    fn current(e: &Env) -> Self {
+        Self(e.ledger().timestamp())
+    }
+}
+
+impl Arithmetic<TimeStamp> for TimeStamp {
+    type Output = TimeStamp;
+
+    fn add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
+    }
+
+    fn sub(self, other: Self) -> Self {
+        Self(self.0 - other.0)
+    }
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -105,6 +174,8 @@ pub enum Error {
     InvalidReveal = 3,
     InvalidOp = 4,
     NotRevealed = 5,
+    LimitNotReached = 6,
+    InvalidSignature = 7,
 }
 
 #[contracttype]
@@ -168,6 +239,8 @@ impl PlayerObj {
 #[derive(Clone)]
 /// Contract data keys
 pub enum DataKey {
+    BetStart,
+    TsLimit,
     Started,
     Token,
     BetAmount,
@@ -178,24 +251,37 @@ pub enum DataKey {
 /// Contract trait
 pub trait RockPaperScissorsTrait {
     // leaving this one for possible updates in the future that need a contract initialization
-    fn initialize(e: Env, token: BytesN<32>, bet_amount: BigInt) -> Result<(), Error>;
+    fn initialize(
+        e: Env,
+        token: BytesN<32>,
+        bet_amount: BigInt,
+        ts_diff: TimeStamp,
+    ) -> Result<(), Error>;
 
     fn make_move(e: Env, sig: Signature, user_move: BytesN<32>) -> Result<(), Error>;
 
     fn reveal(e: Env, player: Player, user_move: Move, secret: Bytes) -> Result<Move, Error>;
 
     fn evaluate(e: Env) -> Result<GameResult, Error>;
+
+    fn cancel(e: Env, sig: Signature, player: Player) -> Result<(), Error>;
 }
 
 pub struct RockPaperScissorsContract;
 
 #[contractimpl]
 impl RockPaperScissorsTrait for RockPaperScissorsContract {
-    fn initialize(e: Env, token: BytesN<32>, bet_amount: BigInt) -> Result<(), Error> {
+    fn initialize(
+        e: Env,
+        token: BytesN<32>,
+        bet_amount: BigInt,
+        ts_diff: TimeStamp,
+    ) -> Result<(), Error> {
         if !game_started(&e) {
             put_started(&e, true);
             put_token(&e, token);
             put_bet(&e, bet_amount);
+            put_ts_limit(&e, ts_diff);
             Ok(())
         } else {
             Err(Error::GameNotStarted)
@@ -220,6 +306,7 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
         } else if !check_player(&e, Player::Two) {
             store_move(&e, Player::Two, player_obj);
             place_bet(&e, sig.identifier(&e));
+            put_bet_start(&e, TimeStamp::current(&e));
             Ok(())
         } else {
             Err(Error::MaxPlayersHit)
@@ -249,7 +336,7 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
 
     fn evaluate(e: Env) -> Result<GameResult, Error> {
         // check that both players have revealed
-        if !check_player(&e, Player::One) || !check_player(&e, Player::Two) {
+        if !check_revealed(&e, Player::One) || !check_revealed(&e, Player::Two) {
             return Err(Error::NotRevealed);
         }
 
@@ -268,5 +355,27 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
             send_profit(&e, p1_obj.id, get_bet(&e) * bigint!(&e, 2));
             Ok(GameResult::Winner(Player::One))
         }
+    }
+
+    fn cancel(e: Env, sig: Signature, player: Player) -> Result<(), Error> {
+        if TimeStamp::current(&e).sub(get_ts_limit(&e)) < get_bet_start(&e) {
+            return Err(Error::LimitNotReached);
+        }
+
+        verify(
+            &e,
+            &sig,
+            symbol!("cancel"),
+            (&player, &get_nonce(&e, sig.identifier(&e))),
+        );
+        put_nonce(&e, sig.identifier(&e));
+
+        let player_obj = get_move(&e, player.clone());
+        if sig.identifier(&e) != player_obj.id {
+            return Err(Error::InvalidSignature);
+        }
+        send_profit(&e, sig.identifier(&e), get_bet(&e));
+        remove_player(&e, player);
+        Ok(())
     }
 }

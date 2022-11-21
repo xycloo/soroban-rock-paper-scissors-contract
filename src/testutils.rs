@@ -1,6 +1,6 @@
 #![cfg(any(test, feature = "testutils"))]
 
-use crate::{GameResult, Move, Player, RockPaperScissorsContractClient};
+use crate::{GameResult, Move, Player, RockPaperScissorsContractClient, TimeStamp};
 
 use soroban_auth::Signature;
 use soroban_sdk::{BigInt, Bytes, BytesN, Env};
@@ -27,8 +27,8 @@ impl RockPaperScissorsContract {
         }
     }
 
-    pub fn initialize(&self, token: BytesN<32>, bet_amount: BigInt) {
-        self.client().initialize(&token, &bet_amount)
+    pub fn initialize(&self, token: &BytesN<32>, bet_amount: &BigInt, ts_diff: &TimeStamp) {
+        self.client().initialize(&token, &bet_amount, &ts_diff)
     }
 
     pub fn make_move(&self, sig: &Signature, user_move: &BytesN<32>) {
@@ -41,5 +41,9 @@ impl RockPaperScissorsContract {
 
     pub fn evaluate(&self) -> GameResult {
         self.client().evaluate()
+    }
+
+    pub fn cancel(&self, sig: &Signature, player: &Player) {
+        self.client().cancel(sig, player)
     }
 }
