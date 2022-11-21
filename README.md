@@ -14,7 +14,7 @@ There are a couple of other things to keep in mind:
 
 ## Workflow
 ![image](https://user-images.githubusercontent.com/70587974/203127840-7bcc14d4-5fb5-40d1-8e4a-b6c95a0e785a.png)
-
+(done with excalidraw)
 
 ### Some things to know
 In this contract we are going to use:
