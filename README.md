@@ -12,6 +12,10 @@ There are a couple of other things to keep in mind:
 # Writing the contract
 > Reading this README assumes that you already have basic soroban knowledge (if you don't, I recommend looking at the soroban docs or at our previous submissions).
 
+## Workflow
+![image](https://user-images.githubusercontent.com/70587974/203127840-7bcc14d4-5fb5-40d1-8e4a-b6c95a0e785a.png)
+(done with excalidraw)
+
 ### Some things to know
 In this contract we are going to use:
 - the standard token contract.
