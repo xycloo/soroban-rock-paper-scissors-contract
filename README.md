@@ -474,3 +474,8 @@ This function can also be called by anyone. It prevents the problem of users not
         Ok(())
     }
 ```
+
+# Futurenet
+> Why not play the game on futurenet?
+
+(soon)

@@ -49,7 +49,10 @@ fn store_move(e: &Env, player: Player, val: PlayerObj) {
 
 fn get_move(e: &Env, player: Player) -> PlayerObj {
     let key = DataKey::Player(player);
-    e.data().get(key).unwrap().unwrap()
+    e.data()
+        .get(key)
+        .unwrap_or_else(|| panic_with_error!(e, Error::InvalidOp))
+        .unwrap()
 }
 
 fn put_nonce(e: &Env, id: Identifier) {

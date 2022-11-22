@@ -28,7 +28,7 @@ impl RockPaperScissorsContract {
     }
 
     pub fn initialize(&self, token: &BytesN<32>, bet_amount: &BigInt, ts_diff: &TimeStamp) {
-        self.client().initialize(&token, &bet_amount, &ts_diff)
+        self.client().initialize(token, bet_amount, &ts_diff)
     }
 
     pub fn make_move(&self, sig: &Signature, user_move: &BytesN<32>) {

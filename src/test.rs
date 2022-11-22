@@ -5,8 +5,8 @@ use crate::token::{self, TokenMetadata};
 use crate::{GameResult, Move, Player, TimeStamp};
 use rand::{thread_rng, RngCore};
 use soroban_auth::{Identifier, Signature};
-use soroban_sdk::bigint;
 use soroban_sdk::testutils::{Ledger, LedgerInfo};
+use soroban_sdk::{bigint, bytes};
 use soroban_sdk::{
     serde::Serialize, testutils::Accounts, AccountId, BigInt, Bytes, BytesN, Env, IntoVal,
 };
