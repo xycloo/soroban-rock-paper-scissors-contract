@@ -293,6 +293,13 @@ fn test_cancel_and_replay() {
     let admin = e.accounts().generate(); // token admin
     let u1 = e.accounts().generate();
 
+    extern crate std;
+    std::println!(
+        "{:?} {:?}",
+        admin,
+        Identifier::Account(admin.clone()).serialize(&e)
+    );
+
     e.ledger().set(LedgerInfo {
         timestamp: 1666359075,
         protocol_version: 1,
@@ -421,4 +428,44 @@ fn test_cancel_and_replay() {
     matches!(contract.evaluate(), GameResult::Winner(Player::One));
     assert_eq!(usdc_token.balance(&Identifier::Account(admin)), 30);
     assert_eq!(usdc_token.balance(&Identifier::Account(u1)), 0);
+}
+
+#[test]
+fn test_build_hash() {
+    extern crate std;
+    extern crate hex;
+
+    let e: Env = Default::default();
+
+    e.ledger().set(LedgerInfo {
+        timestamp: 1668106305,
+        protocol_version: 20,
+        sequence_number: 10,
+        network_passphrase: "Test SDF Future Network ; October 2022".as_bytes().to_vec(),
+        base_reserve: 10,
+    });
+
+    extern crate stellar_strkey;
+    let public = "GBZSAPPCSJC7UQNABF7C7PJZSW2S2H3BTKTVWEXB53WPPA6PXP6AYZ62";
+    let decoded = stellar_strkey::StrkeyPublicKeyEd25519::from_string(&public)
+        .unwrap()
+        .0;
+
+    let mut serialized_bytes = Bytes::from_array(
+        &e,
+        &[
+            0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7, 65, 99, 99,
+            111, 117, 110, 116, 0, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 0,
+        ],
+    );
+
+    serialized_bytes.append(&Bytes::from_array(&e, &decoded));
+
+    let mut admin_make_move_image = Bytes::new(&e);
+    admin_make_move_image.append(&serialized_bytes);
+    admin_make_move_image.append(&Move::Scissors.as_bytes(&e));
+    admin_make_move_image.append(&Bytes::from_slice(&e, "mysecret1".as_bytes()));
+    let val = e.compute_hash_sha256(&admin_make_move_image);
+
+    std::println!("{:?}", hex::encode(val.to_array()));
 }

@@ -482,4 +482,234 @@ This function can also be called by anyone. It prevents the problem of users not
 # Futurenet
 > Why not play the game on futurenet?
 
-(soon)
+In order to play the game on futurenet you'll need:
+1. A token contract with at least two users that have a balance (can be any token).
+2. A rock-paper-scissors contract (let's call it RPSC) deployed, and initialized.
+3. An allowance to allow the RPSC to spend `n` of `$TOKEN` where `n` and `$TOKEN` are defined when initializing the RPSC.
+4. The hash of your move + secret.
+
+Once you have all the above, you are ready to play and bet on a rock paper scissors game on Soroban!
+
+### Having the token contract
+I won't stay on this topic much since it's not in the scope of this README, but can follow these steps:
+1. create a stellar classic asset, wrap it using the CLI or the examples in the soroban branch of the Python-stellar SDK (https://github.com/StellarCN/py-stellar-base/blob/soroban/examples/soroban_deploy_create_wrapped_token_contract.py ).
+2. make sure that you have an account that holds a certain amount of those tokens, and then import them using the `import` fn of the token contract (remember that you have to think in stroops).
+3. You can make sure that the user has imported the balance by using the `balance` function of the token contract.
+
+Example:
+
+```bash
+~/Desktop/soroban-classic-wrapping ❯ python3 create.py
+simulated transaction: footprint='AAAAAAAAAAMAAAAG03yUs1elnu8w4XZGY/fEp9zBG6YX3YR0xj616FY0t4kAAAADAAAAAwAAAAbTfJSzV6We7zDhdkZj98Sn3MEbphfdhHTGPrXoVjS3iQAAAAQAAAABAAAAAAAAAAEAAAAFAAAABUFkbWluAAAAAAAABtN8lLNXpZ7vMOF2RmP3xKfcwRumF92EdMY+tehWNLeJAAAABAAAAAEAAAAAAAAAAQAAAAUAAAAITWV0YWRhdGE=' cost=Cost(cpu_insns='99383', mem_bytes='19036') results=[TransactionStatusResult(xdr='AAAABAAAAAEAAAAEAAAAINN8lLNXpZ7vMOF2RmP3xKfcwRumF92EdMY+tehWNLeJ')] error=None latest_ledger=937040
+setting footprint and signing transaction...
+sent transaction: id='4973e0b56a27a9063b1b43c6d007920de85205aa15d730b482ba015d1baab2fe' status=<TransactionStatus.PENDING: 'pending'>
+waiting for transaction to be confirmed...
+waiting for transaction to be confirmed...
+transaction status: id='4973e0b56a27a9063b1b43c6d007920de85205aa15d730b482ba015d1baab2fe' status=<TransactionStatus.SUCCESS: 'success'> results=[TransactionStatusResult(xdr='AAAABAAAAAEAAAAEAAAAINN8lLNXpZ7vMOF2RmP3xKfcwRumF92EdMY+tehWNLeJ')]
+contract id: d37c94b357a59eef30e1764663f7c4a7dcc11ba617dd8474c63eb5e85634b789
+
+
+~/Desktop/soroban-rock-paper-scissors-contract main !2 ❯ soroban invoke \
+  --id d37c94b357a59eef30e1764663f7c4a7dcc11ba617dd8474c63eb5e85634b789 \
+  --secret-key $MY_SECRET \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn import \
+  --arg '{"object":{"vec":[{"symbol":"Invoker"}]}}' --arg 0 --arg 50000000
+success
+null
+```
+
+### Deploying and initializing the contract
+To deploy the contract, you first have to compile the code:
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ cargo +nightly build \
+    --target wasm32-unknown-unknown \
+    --release \
+    -Z build-std=std,panic_abort \
+    -Z build-std-features=panic_immediate_abort
+   Compiling soroban-rock-paper-scissors-contract v0.0.0 (/home/tommasodeponti/Desktop/soroban-rock-paper-scissors-contract)
+    Finished release [optimized] target(s) in 0.67s
+```
+
+Then you can deploy:
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban deploy \
+    --wasm target/wasm32-unknown-unknown/release/soroban_rock_paper_scissors_contract.wasm  --secret-key $SECRET --rpc-url  https://future.stellar.kai.run:443/soroban/rpc --network-passphrase 'Test SDF Future Network ; October 2022'
+success
+7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b
+```
+
+Now we have to initialize the contract:
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban invoke --id 7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b \
+  --secret-key $SOME_SECRET \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn initialize \
+  --arg 'd37c94b357a59eef30e1764663f7c4a7dcc11ba617dd8474c63eb5e85634b789' --arg 10000000 --arg '{"object":{"vec":[{"object":{"u64":3600}}]}}'
+```
+
+As you can see, we supplied three arguments: the token contract, the bet amount (in stroops), and the timestamp difference, which is in our case an hour (3600 seconds) (see previous sections to learn about these three parameters).
+
+### The allowance
+We approve the previously deployed contract to spend 10000000 stroops of the previously wrapped and imported token:
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban invoke \                                                                                                                    
+  --id d37c94b357a59eef30e1764663f7c4a7dcc11ba617dd8474c63eb5e85634b789 \
+  --secret-key $SECRET \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn approve \
+  --arg '{"object":{"vec":[{"symbol":"Invoker"}]}}' --arg 0 --arg '{"object":{"vec":[{"symbol":"Contract"},{"object":{"bytes":"7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b"}}]}}' --arg 10000000
+success
+null
+```
+
+### Building the hash of the move
+Since users don't play in real time one against the other, the contract uses a commitment technique as previously disussed. But how do we generate the hash for a futurenet account?
+
+You can simply use this test function we created:
+
+```rust
+#[test]
+fn test_build_hash() {
+    extern crate std;
+    extern crate hex;
+
+    let e: Env = Default::default();
+
+    e.ledger().set(LedgerInfo {
+        timestamp: 1668106305,
+        protocol_version: 20,
+        sequence_number: 10,
+        network_passphrase: "Test SDF Future Network ; October 2022".as_bytes().to_vec(),
+        base_reserve: 10,
+    });
+
+    extern crate stellar_strkey;
+    let public = "GBZSAPPCSJC7UQNABF7C7PJZSW2S2H3BTKTVWEXB53WPPA6PXP6AYZ62";
+    let decoded = stellar_strkey::StrkeyPublicKeyEd25519::from_string(&public)
+        .unwrap()
+        .0;
+
+    let mut serialized_bytes = Bytes::from_array(
+        &e,
+        &[
+            0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7, 65, 99, 99,
+            111, 117, 110, 116, 0, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 0,
+        ],
+    );
+
+    serialized_bytes.append(&Bytes::from_array(&e, &decoded));
+
+    let mut admin_make_move_image = Bytes::new(&e);
+    admin_make_move_image.append(&serialized_bytes);
+    admin_make_move_image.append(&Move::Scissors.as_bytes(&e));
+    admin_make_move_image.append(&Bytes::from_slice(&e, "mysecret1".as_bytes()));
+    let val = e.compute_hash_sha256(&admin_make_move_image);
+
+    std::println!("{:?}", hex::encode(val.to_array()));
+}
+```
+
+As you can see, you just need to put in your public key, then your move (in this case `Move::Scissors` as bytes), and then a secret which you should not share until you reveal your move.
+
+This will return you a hash in hex format.
+
+## Playing
+Now that you have everything set up (remember to repeat steps 3 and 4 (allowance and buillding move hash) for another user), you can invoke the `make_move` fn of the contract:
+
+### Making the move
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban invoke --id 7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b \  
+  --secret-key $U1_SECRET \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn make_move \
+  --arg '{"object":{"vec":[{"symbol":"Invoker"}]}}' --arg "$U1_MOVE_HASH"
+success
+null
+```
+
+Then you'll have to wait until a second player makes the move:
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban invoke --id 7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b \  
+  --secret-key $U2_SECRET \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn make_move \
+  --arg '{"object":{"vec":[{"symbol":"Invoker"}]}}' --arg "$U2_MOVE_HASH"
+success
+null
+```
+
+### Revealing
+Now each player (u1 as player one since they made the move first, and u2 as player two) has to reveal their move so that the contract can evaluate who the winner is and send them the rewards.
+
+U1 reveal (remember that the invoker here doesn't matter, there just needs to be the secret as hex):
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban invoke \
+  --id 7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b \
+  --secret-key $SOME_SECRET \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn reveal \
+  --arg '{"object":{"vec":[{"symbol":"One"}]}}' --arg '{"u32":0}' --arg "6d79736563726574"
+
+success
+0
+```
+
+Note that we are invoking for `Player::One` (U1), that we are passing `Move::Rock = 0` as a u32 object, and that the last parameter is the hex encoding of U1's secret (`"mysecret"`).
+
+Now invoking for U2 (`Player::Two`) with their move (`Move::Scissors`), and their secret as hex (`"mysecret1"`):
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban invoke \
+  --id 7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b \
+  --secret-key $SOME_SECRET \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn reveal \
+  --arg '{"object":{"vec":[{"symbol":"Two"}]}}' --arg '{"u32":2}' --arg "6d7973656372657431"
+
+success
+2
+```
+
+You can see that both these function if all the provided parameters are correct will return the u32 representation of the `Move` enum:
+
+```rust
+#[contracttype]
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub enum Move {
+    Rock = 0,
+    Paper = 1,
+    Scissors = 2,
+    Unrevealed = 3,
+}
+```
+
+Now that both players have revealed we can call the `evaluate` fn to evaluate the winner and have they receive the bet profit:
+
+```bash
+~/Desktop/soroban-rock-paper-scissors-contract main !3 ❯ soroban invoke \
+  --id 7236cd5d2607a1a9a3950942a66c2b229afbea5ce2d29714af75f18bf993cb7b \
+  --secret-key SB3YZR6KMXEOEWAMS4HUQX4JTWW6METEP3LAXSH2F3GQQT4LOYCR3A44 \
+  --rpc-url https://future.stellar.kai.run:443/soroban/rpc \
+  --network-passphrase 'Test SDF Future Network ; October 2022' \
+  --fn evaluate
+success
+["Winner",["One"]]
+```
+
+You can see that the winner is indeed U1 who played `Move::Rock` against `Move::Scissors`. U1 now has `10` `$TOKEN` more and U2 `10` `$TOKEN` less!
+
