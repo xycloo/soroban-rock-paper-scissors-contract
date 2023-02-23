@@ -1,15 +1,10 @@
 #![no_std]
 
-#[cfg(feature = "testutils")]
-extern crate std;
-
 mod test;
-pub mod testutils;
 
-use soroban_auth::{verify, Identifier, Signature};
 use soroban_sdk::{
-    bigint, bytes, contracterror, contractimpl, contracttype, panic_with_error, serde::Serialize,
-    symbol, BigInt, Bytes, BytesN, Env,
+    bytes, contracterror, contractimpl, contracttype, panic_with_error, serde::Serialize, symbol,
+    Address, Bytes, BytesN, Env,
 };
 
 mod token {
@@ -18,7 +13,7 @@ mod token {
 
 fn check_player(e: &Env, player: Player) -> bool {
     let key = DataKey::Player(player);
-    e.data().has(key)
+    e.storage().has(&key)
 }
 
 fn check_revealed(e: &Env, player: Player) -> bool {
@@ -29,111 +24,97 @@ fn check_revealed(e: &Env, player: Player) -> bool {
 
 fn put_started(e: &Env, started: bool) {
     let key = DataKey::Started;
-    e.data().set(key, started);
+    e.storage().set(&key, &started);
 }
 
 fn game_started(e: &Env) -> bool {
     let key = DataKey::Started;
-    e.data().get(key).unwrap_or(Ok(false)).unwrap()
+    e.storage().get(&key).unwrap_or(Ok(false)).unwrap()
 }
 
 fn remove_player(e: &Env, player: Player) {
     let key = DataKey::Player(player);
-    e.data().remove(key);
+    e.storage().remove(&key);
 }
 
 fn store_move(e: &Env, player: Player, val: PlayerObj) {
     let key = DataKey::Player(player);
-    e.data().set(key, val);
+    e.storage().set(&key, &val);
 }
 
 fn get_move(e: &Env, player: Player) -> PlayerObj {
     let key = DataKey::Player(player);
-    e.data()
-        .get(key)
+    e.storage()
+        .get(&key)
         .unwrap_or_else(|| panic_with_error!(e, Error::InvalidOp))
-        .unwrap()
-}
-
-fn put_nonce(e: &Env, id: Identifier) {
-    let key = DataKey::Nonce(id.clone());
-    e.data().set(key, get_nonce(e, id) + 1);
-}
-
-fn get_nonce(e: &Env, id: Identifier) -> BigInt {
-    let key = DataKey::Nonce(id);
-    e.data()
-        .get(key)
-        .unwrap_or_else(|| Ok(BigInt::zero(e)))
         .unwrap()
 }
 
 fn put_token(e: &Env, token: BytesN<32>) {
     let key = DataKey::Token;
-    e.data().set(key, token);
+    e.storage().set(&key, &token);
 }
 
 fn get_token(e: &Env) -> BytesN<32> {
     let key = DataKey::Token;
-    e.data()
-        .get(key)
+    e.storage()
+        .get(&key)
         .unwrap_or_else(|| panic_with_error!(e, Error::GameNotStarted))
         .unwrap()
 }
 
 fn put_ts_limit(e: &Env, ts_diff: TimeStamp) {
     let key = DataKey::TsLimit;
-    e.data().set(key, ts_diff);
+    e.storage().set(&key, &ts_diff);
 }
 
 fn get_ts_limit(e: &Env) -> TimeStamp {
     let key = DataKey::TsLimit;
-    e.data()
-        .get(key)
+    e.storage()
+        .get(&key)
         .unwrap_or_else(|| panic_with_error!(e, Error::GameNotStarted))
         .unwrap()
 }
 
 fn put_bet_start(e: &Env, ts: TimeStamp) {
     let key = DataKey::BetStart;
-    e.data().set(key, ts);
+    e.storage().set(&key, &ts);
 }
 
 fn get_bet_start(e: &Env) -> TimeStamp {
     let key = DataKey::BetStart;
-    e.data()
-        .get(key)
+    e.storage()
+        .get(&key)
         .unwrap_or_else(|| panic_with_error!(e, Error::GameNotStarted))
         .unwrap()
 }
 
-fn put_bet(e: &Env, amount: BigInt) {
+fn put_bet(e: &Env, amount: i128) {
     let key = DataKey::BetAmount;
-    e.data().set(key, amount);
+    e.storage().set(&key, &amount);
 }
 
-fn get_bet(e: &Env) -> BigInt {
+fn get_bet(e: &Env) -> i128 {
     let key = DataKey::BetAmount;
-    e.data()
-        .get(key)
+    e.storage()
+        .get(&key)
         .unwrap_or_else(|| panic_with_error!(e, Error::GameNotStarted))
         .unwrap()
 }
 
-fn place_bet(e: &Env, from: Identifier) {
-    let client = token::Client::new(e, get_token(e));
+fn place_bet(e: &Env, from: Address) {
+    let client = token::Client::new(e, &get_token(e));
     client.xfer_from(
-        &Signature::Invoker,
-        &BigInt::zero(e),
+        &e.current_contract_address(),
         &from,
-        &Identifier::Contract(e.current_contract()),
+        &e.current_contract_address(),
         &get_bet(e),
     );
 }
 
-fn send_profit(e: &Env, to: Identifier, amount: BigInt) {
-    let client = token::Client::new(e, get_token(e));
-    client.xfer(&Signature::Invoker, &BigInt::zero(e), &to, &amount)
+fn send_profit(e: &Env, to: Address, amount: i128) {
+    let client = token::Client::new(e, &get_token(e));
+    client.xfer(&e.current_contract_address(), &to, &amount)
 }
 
 // Perform arithmetic ops on custom types
@@ -223,13 +204,13 @@ impl Move {
 #[contracttype]
 #[derive(Clone)]
 pub struct PlayerObj {
-    id: Identifier,
+    id: Address,
     user_move: BytesN<32>,
     move_pre: Move,
 }
 
 impl PlayerObj {
-    pub fn new(id: Identifier, user_move: BytesN<32>) -> Self {
+    pub fn new(id: Address, user_move: BytesN<32>) -> Self {
         PlayerObj {
             id,
             user_move,
@@ -247,7 +228,6 @@ pub enum DataKey {
     Started,
     Token,
     BetAmount,
-    Nonce(Identifier),
     Player(Player),
 }
 
@@ -257,11 +237,11 @@ pub trait RockPaperScissorsTrait {
     fn initialize(
         e: Env,
         token: BytesN<32>,
-        bet_amount: BigInt,
+        bet_amount: i128,
         ts_diff: TimeStamp,
     ) -> Result<(), Error>;
 
-    fn make_move(e: Env, sig: Signature, user_move: BytesN<32>) -> Result<(), Error>;
+    fn make_move(e: Env, user: Address, user_move: BytesN<32>) -> Result<(), Error>;
 
     fn reveal(e: Env, player: Player, user_move: Move, secret: Bytes) -> Result<Move, Error>;
 
@@ -277,7 +257,7 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
     fn initialize(
         e: Env,
         token: BytesN<32>,
-        bet_amount: BigInt,
+        bet_amount: i128,
         ts_diff: TimeStamp,
     ) -> Result<(), Error> {
         if !game_started(&e) {
@@ -291,24 +271,22 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
         }
     }
 
-    fn make_move(e: Env, sig: Signature, user_move: BytesN<32>) -> Result<(), Error> {
+    fn make_move(e: Env, user: Address, user_move: BytesN<32>) -> Result<(), Error> {
         if !game_started(&e) {
             panic!("game started yet")
         }
 
-        let nonce = get_nonce(&e, sig.identifier(&e));
-        verify(&e, &sig, symbol!("move"), (&user_move, &nonce));
-        put_nonce(&e, sig.identifier(&e)); // putting the nonce even for the Invoker singature
+        user.require_auth();
 
-        let player_obj = PlayerObj::new(sig.identifier(&e), user_move);
+        let player_obj = PlayerObj::new(user.clone(), user_move);
 
         if !check_player(&e, Player::One) {
             store_move(&e, Player::One, player_obj);
-            place_bet(&e, sig.identifier(&e));
+            place_bet(&e, user);
             Ok(())
         } else if !check_player(&e, Player::Two) {
             store_move(&e, Player::Two, player_obj);
-            place_bet(&e, sig.identifier(&e));
+            place_bet(&e, user);
             put_bet_start(&e, TimeStamp::current(&e));
             Ok(())
         } else {
@@ -326,7 +304,7 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
         rhs.append(&user_move.as_bytes(&e));
         rhs.append(&secret);
 
-        let rhs_hash = e.compute_hash_sha256(&rhs);
+        let rhs_hash = e.crypto().sha256(&rhs);
 
         if player_obj.user_move != rhs_hash {
             return Err(Error::InvalidReveal);
@@ -347,7 +325,7 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
         let p2_obj = get_move(&e, Player::Two);
 
         if (p1_obj.move_pre.repr() + 1) % 3 == p2_obj.move_pre.repr() {
-            send_profit(&e, p2_obj.id, get_bet(&e) * bigint!(&e, 2));
+            send_profit(&e, p2_obj.id, get_bet(&e) * 2);
             remove_player(&e, Player::One);
             remove_player(&e, Player::Two);
             Ok(GameResult::Winner(Player::Two))
@@ -359,7 +337,7 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
             remove_player(&e, Player::Two);
             Ok(GameResult::Draw)
         } else {
-            send_profit(&e, p1_obj.id, get_bet(&e) * bigint!(&e, 2));
+            send_profit(&e, p1_obj.id, get_bet(&e) * 2);
             remove_player(&e, Player::One);
             remove_player(&e, Player::Two);
             Ok(GameResult::Winner(Player::One))
@@ -380,7 +358,7 @@ impl RockPaperScissorsTrait for RockPaperScissorsContract {
             return Err(Error::LimitNotReached);
         }
 
-        send_profit(&e, p_obj.id, get_bet(&e) * bigint!(&e, 2));
+        send_profit(&e, p_obj.id, get_bet(&e) * 2);
         remove_player(&e, Player::One);
         remove_player(&e, Player::Two);
         Ok(())
